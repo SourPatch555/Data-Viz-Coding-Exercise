@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Level 2</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    /* Tooltip style for showing information on hover */
+    .tooltip {
+      position: absolute;
+      background-color: white;
+      border: 1px solid #ccc;
+      padding: 5px;
+      font-size: 12px;
+      pointer-events: none;
+    }
+    /* Additional styles for cell borders and line charts */
+    .cell {
+      stroke: #ccc;
+    }
+    .line-chart {
+      fill: none;
+      stroke-width: 1.5px;
+    }
+    .line-chart-max {
+      stroke: rgb(0, 0, 0); /* Black color for max temperature lines */
+    }
+    .line-chart-min {
+      stroke: rgb(17, 93, 4); /* Green color for min temperature lines */
+    }
+  </style>
+</head>
+<body>
+  <h1 style="text-align: center;">Level 2</h1>
+  <div style="text-align: center;" id="heatmap-level2"></div>
+
+  <script>
+    // Set up the margins for the SVG container, defining the space around the chart
+    const margin = { top: 50, right: 50, bottom: 50, left: 100 };
+    const width = 1200 - margin.left - margin.right;
+    const height = 600 - margin.top - margin.bottom;
+
+    // Create the SVG element and apply a transformation to fit it within the margins
+    const svg = d3.select("#heatmap-level2")
+      .append("svg")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
+
+    // Create a tooltip for showing information when hovering over a cell
+    const tooltip = d3.select("body").append("div")
+      .attr("class", "tooltip")
+      .style("opacity", 0);
+
+    // Array containing the names of the months for display
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+    // Load the CSV data using D3.js
+    d3.csv("temperature_daily.csv").then(allData => {
+        // Parse and process the data
+        allData.forEach(d => {
+            d.date = new Date(d.date); // Convert the date from string to Date object
+            d.year = d.date.getUTCFullYear(); // Extract year
+            d.month = d.date.getMonth(); // Extract month
+            d.day = d.date.getDate(); // Extract day
+            d.max_temperature = +d.max_temperature; // Convert max temperature to number
+            d.min_temperature = +d.min_temperature; // Convert min temperature to number
+        });
+
+        // Find the most recent year in the data
+        const mostRecentYear = d3.max(allData, d => d.year);
+
+        // Filter the data to keep only the last 10 years
+        const data = allData.filter(d => d.year >= mostRecentYear - 9);
+
+        // Group the data by year and month
+        const nestedData = d3.group(data, d => d.year, d => d.month);
+
+        // Define the scales for color and positioning
+        const years = Array.from(new Set(data.map(d => d.year))); // Extract unique years
+        const months = Array.from(new Set(data.map(d => d.month))).sort((a, b) => a - b); // Extract and sort months
+
+        // Define color scales for minimum and maximum temperatures
+        const minColorScale = d3.scaleSequential(d3.interpolateYlOrRd)
+          .domain([d3.min(data, d => d.min_temperature), d3.max(data, d => d.min_temperature)]);
+
+        const maxColorScale = d3.scaleSequential(d3.interpolateYlOrRd)
+          .domain([d3.min(data, d => d.max_temperature), d3.max(data, d => d.max_temperature)]);
+
+        // Define a general color scale for the legend
+        const colorScale = d3.scaleSequential(d3.interpolateYlOrRd)
+          .domain([d3.min(data, d => d.min_temperature), d3.max(data, d => d.max_temperature)]);
+
+        // Set up scales for the axes (for year and month)
+        const xScale = d3.scaleBand().domain(years).range([0, width]).padding(0.05); // X axis scale for years
+        const yScale = d3.scaleBand().domain(months).range([0, height]).padding(0.05); // Y axis scale for months
+
+        // Create a scale indicator for toggling between min/max temperature scale
+        const scaleIndicator = d3.select("body")
+          .append("div")
+          .attr("id", "scale-indicator")
+          .style("text-align", "center")
+          .style("font-size", "16px")
+          .style("margin-top", "10px")
+          .text("Current Scale: Min Temperature (Click any cell to toggle)");
+
+        let useMinColor = true; // Initialize the color scale toggle variable
+
+        // Draw heatmap cells with mini line charts representing daily max/min temperatures
+        svg.selectAll(".cell-group")
+          .data(Array.from(nestedData.entries()).flatMap(([year, months]) =>
+            Array.from(months.entries()).map(([month, days]) => ({
+              year,
+              month,
+              days,
+              maxTemp: d3.max(days, d => d.max_temperature),
+              minTemp: d3.min(days, d => d.min_temperature),
+            }))
+          ))
+          .enter()
+          .append("g")
+          .attr("transform", (d) => `translate(${xScale(d.year)},${yScale(d.month)})`) // Position each cell on the grid
+          .each(function (d) {
+            const cellGroup = d3.select(this);
+
+            // Draw the background rectangle for the heatmap cell
+            cellGroup.append("rect")
+              .attr("class", "cell")
+              .attr("width", xScale.bandwidth()) // Set the width of the cell
+              .attr("height", yScale.bandwidth()) // Set the height of the cell
+              .attr("fill", minColorScale((d.minTemp))) // Set the fill color based on the min temperature
+              .on("mouseover", (event) => { // Show tooltip on mouseover
+                tooltip.style("opacity", 1)
+                  .html(`Year: ${d.year}<br>Month: ${monthNames[d.month]}<br>Max Temp: ${d.maxTemp}°C<br>Min Temp: ${d.minTemp}°C`)
+                  .style("left", `${event.pageX + 10}px`)
+                  .style("top", `${event.pageY - 20}px`);
+              })
+              .on("click", function(event, d) { // Toggle color scale on click
+                useMinColor = !useMinColor;
+                d3.selectAll(".cell")
+                  .transition()
+                  .duration(500)
+                  .attr("fill", d => useMinColor 
+                      ? minColorScale(d.minTemp) // Apply min temperature color scale
+                      : maxColorScale(d.maxTemp) // Apply max temperature color scale
+                  );
+                scaleIndicator.text(`Current Scale: ${useMinColor ? "Min Temperature (Click any cell to toggle)" : "Max Temperature (Click any cell to toggle)"}`);
+              })
+              .on("mouseout", () => tooltip.style("opacity", 0)); // Hide tooltip on mouseout
+
+            // Set up the line scales for daily temperature variation
+            const lineXScale = d3.scaleLinear()
+              .domain([1, new Date(d.year, d.month + 1, 0).getDate()]) // Scale based on number of days in the month
+              .range([0, xScale.bandwidth()]);
+            const lineYScale = d3.scaleLinear()
+              .domain([d3.min(data, day => day.min_temperature), d3.max(data, day => day.max_temperature)]) // Y axis range based on min/max temperatures
+              .range([yScale.bandwidth(), 0]);
+
+            // Define the line generators for max and min temperature lines
+            const lineGeneratorMax = d3.line()
+              .x((_, i) => lineXScale(i + 1))
+              .y(day => lineYScale(day.max_temperature));
+
+            const lineGeneratorMin = d3.line()
+              .x((_, i) => lineXScale(i + 1))
+              .y(day => lineYScale(day.min_temperature));
+
+            // Draw the mini line chart for max temperature
+            cellGroup.append('path')
+              .datum(d.days)
+              .attr('class', 'line-chart line-chart-max')
+              .attr('fill', 'none')
+              .attr('d', lineGeneratorMax);
+
+            // Draw the mini line chart for min temperature
+            cellGroup.append('path')
+              .datum(d.days)
+              .attr('class', 'line-chart line-chart-min')
+              .attr('fill', 'none')
+              .attr('d', lineGeneratorMin)
+              .attr('stroke-width', 14); // Thicker line for min temperature for visibility
+          });
+
+        // Add X and Y axes to the heatmap
+        svg.append("g")
+          .call(d3.axisBottom(xScale).tickFormat(d => `${d}`)) // X axis for years
+          .attr("transform", `translate(0,${height})`);
+
+        svg.append("g")
+          .call(d3.axisLeft(yScale).tickFormat(d => monthNames[d])); // Y axis for months
+
+        // Add a color legend
+        const legendWidth = 300;
+        const legendHeight = 20;
+
+        // Create legend SVG group
+        const legendSvg = svg.append("g").attr("transform", `translate(${width - legendWidth},${-40})`);
+
+        // Create legend rectangles based on the color scale
+        legendSvg.selectAll(".legend-rect")
+          .data(d3.range(colorScale.domain()[0], colorScale.domain()[1], (colorScale.domain()[1] - colorScale.domain()[0]) / legendWidth))
+          .enter()
+          .append("rect")
+          .attr("x", (d, i) => i)
+          .attr("y", 0)
+          .attr("width", 1)
+          .attr("height", legendHeight)
+          .attr("fill", colorScale);
+
+        // Add axis to the color legend
+        legendSvg.append("g")
+          .call(d3.axisBottom(d3.scaleLinear().domain(colorScale.domain()).range([0, legendWidth])).ticks(5))
+          .attr("transform", `translate(0,${legendHeight})`);
+    });
+  </script>
+</body>
+</html>
